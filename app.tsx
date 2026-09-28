@@ -1,10 +1,10 @@
-// bb-plugin-handoff — frontend: two surfaces, one per direction.
+// bb-plugin-handoff — frontend: handoff controls for existing threads.
 //
 // Out: the "Hand off" thread panel — an operate-mode surface inside bb's
 // shell that reads as one quiet form (route header source → target, target
 // picker, workspace, notes) with a sticky action footer that turns into a
 // live progress rail during a handoff.
-// In: the "Adopt agent session" compose-screen section (adopt/section.tsx).
+// Import external sessions through `bb handoff adopt`; keep compose uncluttered.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   definePluginApp,
@@ -15,7 +15,6 @@ import {
 } from "@bb/plugin-sdk/app";
 import { toast } from "sonner";
 import type { rpcContract } from "./server";
-import { AdoptSection } from "./adopt/section";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 // bb's vendored controls carry no coarse-pointer sizing of their own — the app
@@ -1185,10 +1184,5 @@ export default definePluginApp((app) => {
       });
       if (!opened) toast.error("Couldn't open the Hand off panel here.");
     },
-  });
-  app.slots.homepageSection({
-    id: "adopt",
-    title: "Adopt agent session",
-    component: AdoptSection,
   });
 });
