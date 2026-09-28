@@ -111,17 +111,16 @@ it discusses are on a disk the next agent can't see. So the handoff also:
 The other direction. You've been working in a plain terminal, it's turning into
 real work, and you want it in bb — with its history, in its own directory.
 
-![The Adopt agent session panel listing recent Claude, Codex and OpenCode sessions for a project](assets/screenshots/adopt-session.png)
+Use `bb handoff adopt` from your terminal or ask an agent to adopt a session.
+List recent sessions with `bb handoff adopt list`, or pass a session id or
+resume command directly:
 
-On the new-thread screen, expand **Continue a session from another agent**.
-Paste a session id — or the whole resume command you'd have typed —
-
+```sh
+bb handoff adopt "claude --resume <session-id>"
+bb handoff adopt "codex resume <session-id>"
 ```
-claude --resume 9ace2fd5-d8ae-4946-a0a0-9ff58a6795df
-codex resume 019fd95c-907f-7eb1-8dfc-2aad427ffc09
-```
 
-— or just browse recent sessions per project and tap one.
+The plugin does not add an adoption section to the new-thread screen.
 
 | Agent       | Session store                                  | Continues on                          |
 | ----------- | ---------------------------------------------- | ------------------------------------- |
@@ -142,8 +141,7 @@ codex resume 019fd95c-907f-7eb1-8dfc-2aad427ffc09
 - `--machine <host>` adopts from another enrolled machine and runs the thread
   over there. Claude and Codex resolve from a session id alone; Gemini and
   OpenCode need `--cwd`, since their ids live inside a file and a SQLite row.
-  The panel has the same axis: a **From machine** picker appears once a second
-  machine is enrolled. And `bb handoff adopt` run from a bb thread that lives
+  `bb handoff adopt` run from a bb thread that lives
   on another machine follows that machine automatically — its directory is
   over there, so that is where the sessions are read.
 
