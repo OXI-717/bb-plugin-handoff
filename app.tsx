@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import type { rpcContract } from "./server";
 import { AdoptSection } from "./adopt/section";
+import {RemoteHandoffPanel} from './remote-panel';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 // bb's vendored controls carry no coarse-pointer sizing of their own — the app
@@ -298,6 +299,7 @@ function parseScope(params: unknown): HandoffScope | null {
 function HandoffPanel({ threadId, params }: { threadId: string; params?: unknown }) {
   const rpc = useRpc<typeof rpcContract>();
   const navigate = useBbNavigate();
+  const [remoteMode,setRemoteMode]=useState(false);
 
   const initialScope = useMemo(() => parseScope(params), [params]);
   const [scopeCleared, setScopeCleared] = useState(false);
@@ -573,11 +575,14 @@ function HandoffPanel({ threadId, params }: { threadId: string; params?: unknown
   );
   const stageIndex = railStages.findIndex((step) => step.key === stage);
 
+  if(remoteMode)return <RemoteHandoffPanel threadId={threadId} upToSeq={upToSeq} onBack={()=>setRemoteMode(false)}/>;
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full flex-col">
         <div className="flex-1 overflow-y-auto">
           <div className="flex flex-col gap-6 p-4">
+            <Button variant="outline" onClick={()=>setRemoteMode(true)} disabled={pending}>🌐 Hand off to an independent BB server</Button>
             {/* Partial-scope banner (opened from a message action) */}
             {scope ? (
               <div className="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-2.5">

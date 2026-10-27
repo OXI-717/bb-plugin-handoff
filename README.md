@@ -226,6 +226,12 @@ lookup, `parse(file)` for transcript blocks — and registering it in
 - **Not adoptable:** agents that don't persist full transcripts locally — Amp
   keeps threads server-side, Cursor keeps them in app-internal databases.
 
+## Independent BB servers
+
+See [remote handoff](HANDOFF-REMOTE.md) for explicit server/workspace selection and
+bounded snapshot/attachment transfer through the federation plugin. This does not
+enroll remote machines in the current BB.
+
 ## Development
 
 ```sh

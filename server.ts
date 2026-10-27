@@ -10,6 +10,7 @@ import { z } from "zod";
 import { adoptCommandSpecs, runAdoptCli } from "./adopt/cli";
 import { adoptRpcShape, createAdoptRpcHandlers } from "./adopt/rpc";
 import { captureThread } from "./capture";
+import {remoteRpcShape,createRemoteHandlers} from "./remote-handoff";
 import {
   listHandoffs,
   REASONING_LEVELS,
@@ -58,6 +59,7 @@ const upToSeqField = z.number().int().positive().optional();
 
 export const rpcContract = defineRpcContract({
   ...adoptRpcShape,
+  ...remoteRpcShape,
   prepareHandoff: {
     input: z.object({ threadId: z.string(), upToSeq: upToSeqField }).strict(),
     output: z.object({
@@ -221,6 +223,7 @@ export default async function plugin(bb: BbPluginApi) {
 
   bb.rpc.register(rpcContract, {
     ...createAdoptRpcHandlers(bb),
+    ...createRemoteHandlers(bb),
     async prepareHandoff({ threadId, upToSeq }) {
       const captured = await captureThread(bb, threadId, { untilSeq: upToSeq });
       const doc = renderHandoff(captured, new Date());

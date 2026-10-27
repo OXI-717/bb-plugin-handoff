@@ -1,13 +1,13 @@
 {
   "name": "bb-plugin-handoff",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
-    "bb": ">=0.36",
+    "bb": ">=0.46.1",
     "bbPluginSdk": "^0.4.1"
   },
   "bb": {
