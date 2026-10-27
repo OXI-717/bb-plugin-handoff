@@ -19,6 +19,27 @@ function harness(rows:any[]=[request(1,'first'),request(2,'last')]){
 }
 const target={serverId:'alpha',projectId:'proj_alpha',hostId:'host_alpha',environmentId:'env_alpha',providerId:'codex',model:'model-example',attachments:[],instructions:''};
 describe('independent-server handoff',()=>{
+ it('resolves native localImage without name/type/size from stored project bytes',async()=>{
+  const row=request(1,'image');(row.data.input as any[]).push({type:'localImage',path:'stored.png',sourceProjectId:'proj_local'});
+  const h=harness([row]);h.bb.sdk.projects.attachments.read=async()=>({bytes:Buffer.from('synthetic-image-bytes'),sizeBytes:21,mimeType:'image/png'});
+  const value=await captureRemoteSnapshot(h.bb,{threadId:'thr_local'});
+  expect(value.attachments).toHaveLength(1);expect(value.attachments[0]).toMatchObject({name:'stored.png',path:'stored.png',mimeType:'image/png',sizeBytes:21});
+  expect(value.attachments[0].sha256).toMatch(/^[a-f0-9]{64}$/);
+ });
+ it('canonicalizes JSONL MIME lookup and detects same-size attachment replacement',async()=>{
+  const row=request(1,'file');(row.data.input as any[]).push({type:'localFile',path:'stored.jsonl',name:'events.jsonl'});
+  const h=harness([row]);let bytes=Buffer.from('{}\n');
+  h.bb.sdk.projects.attachments.read=async()=>({bytes,sizeBytes:bytes.length,mimeType:'application/octet-stream'});
+  const handlers=createRemoteHandlers(h.bb),value=await handlers.remotePrepare({threadId:'thr_local'});
+  expect(value.attachments[0].mimeType).toBe('application/x-ndjson');bytes=Buffer.from('[]\n');
+  await expect(handlers.remoteStart({...target,snapshotId:value.snapshotId,attachments:[0]})).rejects.toThrow('Attachment changed');
+  expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+ });
+ it('bounds local metadata reads and does not scan arbitrary numbers of attachments',async()=>{
+  const row=request(1,'files');for(let n=0;n<20;n++)(row.data.input as any[]).push({type:'localFile',path:`file-${n}.txt`});
+  const h=harness([row]);const value=await captureRemoteSnapshot(h.bb,{threadId:'thr_local'});
+  expect(h.calls.filter(c=>c.kind==='file')).toHaveLength(14);expect(value.attachments).toHaveLength(14);expect(value.unavailable).toBe(6);
+ });
  it('captures a bounded saved snapshot with no model, file or remote calls',async()=>{
   const h=harness(Array.from({length:203},(_,i)=>request(i+1,`message ${i}`)));
   const result=await captureRemoteSnapshot(h.bb,{threadId:'thr_local'});
@@ -37,7 +58,8 @@ describe('independent-server handoff',()=>{
  it('only explicitly selected stored project attachments travel; original private paths are not opened',async()=>{
   const row=request(1,'hi');(row.data.input as any[]).push({type:'localFile',sourceProjectId:'proj_local',path:'stored.txt',name:'original.txt',mimeType:'text/plain',sizeBytes:4});
   const h=harness([row]),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
-  expect(h.calls.some(c=>c.kind==='file')).toBe(false);
+  expect(h.calls.filter(c=>c.kind==='file')).toHaveLength(1);
+  h.calls.length=0;
   await handlers.remoteStart({...target,snapshotId:preview.snapshotId,attachments:[0]});
   expect(h.calls.filter(c=>c.kind==='file').map(c=>c.args)).toEqual([{projectId:'proj_local',path:'stored.txt'}]);
   const start=h.calls.find(c=>c.method==='handoffBegin');expect(start.input.files.map((f:any)=>f.name)).toEqual(['handoff.md','conversation.jsonl','attachment-1.txt']);

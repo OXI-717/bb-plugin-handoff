@@ -8,7 +8,8 @@ Open Hand off, then **Hand off to an independent BB server**. Select a configure
 server/project, a connected machine's ready environment, and a provider/model
 reported by that remote environment. Review the source snapshot and choose which
 attachments to copy. No attachment is selected by default. The final button copies
-the snapshot and starts one remote session; opening the panel only reads metadata.
+the snapshot and starts one remote session; opening the panel reads the saved snapshot and up to 14 stored attachments locally
+to resolve their metadata and hashes. Nothing is sent remotely until confirmation.
 
 The destination owns execution and permissions. No remote machine is enrolled in
 primary BB. The transfer exports no credentials or native provider session and

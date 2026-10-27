@@ -54,7 +54,7 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
   <Button variant="outline" onClick={onBack} disabled={pending}>Back to machines on this BB</Button>
   <h2 className="font-semibold">🌐 Hand off to a remote BB</h2>
   <p className="text-sm text-muted-foreground">Copies saved conversation events and the attachments you select. The working directory, credentials and native provider session stay on the source server. Remote machines are not enrolled here.</p>
-  <fieldset disabled={pending||attempted} className="flex flex-col gap-3">
+  <fieldset disabled={pending||attempted} className="flex min-w-0 flex-col gap-3">
    <Label htmlFor="remote-server">Remote server / project</Label>
    <select id="remote-server" className={selectClass} value={serverId} onChange={e=>{setServerId(e.target.value);setEnvironmentId('');setError('');}}>
     <option value="">Choose a remote server</option>{servers.map(s=><option key={s.serverId} value={s.serverId} disabled={!s.available}>{s.label} — {s.projectId}{s.available?'':' (unavailable or read-only)'}</option>)}
