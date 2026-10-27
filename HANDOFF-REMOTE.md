@@ -27,6 +27,14 @@ can still contain private data: only transfer a source you intend to share.
   snapshot. Supported: text, Markdown, JSON/JSONL, PDF and raster images.
 - Only stored project attachments referenced in typed user input positions can
   be selected. URLs, absolute host paths and arbitrary tool output are not read.
+- Starting a transfer returns a queued acknowledgement before recapturing history
+  or uploading files. A single BB background service processes accepted transfers;
+  the panel polls read-only status and shows the current phase, uploaded count and
+  bounded failure message. Long transfers do not hold the browser RPC open.
+- Disabling/reloading the plugin stops before the next remote mutation. An already
+  issued call may still finish. Queued/in-flight work is never replayed after a
+  reload; its saved snapshot and operation ID remain available through status.
+  A queued acknowledgement does not confirm upload or session creation.
 - Upload/create calls have no automatic retry. State persists in both plugins.
   An interrupted transfer can leave uploaded files or a created thread remotely.
   Use **Check transfer status** before manually starting another transfer.

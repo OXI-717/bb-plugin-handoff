@@ -12,12 +12,13 @@ const scope=z.object({threadId:id('thr'),upToSeq:z.number().int().positive().opt
 const storedPath=z.string().min(1).max(255).regex(/^[a-zA-Z0-9][a-zA-Z0-9_. -]*$/).refine(v=>!v.includes('..'));
 const attachment=z.object({path:storedPath,name:z.string(),mimeType:z.string(),sizeBytes:z.number().int().positive().max(4*1024*1024),sha256:z.string().regex(/^[a-f0-9]{64}$/)});
 const preview=z.object({snapshotId:z.string().uuid(),sourceThreadId:id('thr'),sourceProjectId:id('proj'),title:z.string(),eventCount:z.number(),cutoff:z.number(),bytes:z.number(),attachments:z.array(attachment),unavailable:z.number()});
+const transferStatus=z.object({state:z.string(),phase:z.string(),error:z.string().nullable(),operation:result.nullable()});
 export const remoteRpcShape={
  remoteTargets:{input:z.null(),output:servers},
  remoteOptions:{input:target.extend({providerId:z.string().optional()}).strict(),output:options},
  remotePrepare:{input:scope,output:preview},
- remoteStart:{input:selection.extend({snapshotId:z.string().uuid(),attachments:z.array(z.number().int().nonnegative()).max(14),instructions:z.string().max(8000)}).strict(),output:result},
- remoteStatus:{input:z.object({snapshotId:z.string().uuid()}).strict(),output:z.object({state:z.string(),operation:result.nullable()})},
+ remoteStart:{input:selection.extend({snapshotId:z.string().uuid(),attachments:z.array(z.number().int().nonnegative()).max(14),instructions:z.string().max(8000)}).strict(),output:transferStatus},
+ remoteStatus:{input:z.object({snapshotId:z.string().uuid()}).strict(),output:transferStatus},
 };
 const sha=(bytes:Uint8Array|string)=>createHash('sha256').update(bytes).digest('hex');
 const MAX_BYTES=4*1024*1024;
@@ -80,24 +81,21 @@ export function createRemoteHandlers(bb:BbPluginApi){
   return bb.sdk.plugins.callRpc({pluginId:'federation-pilot',method,input:input as any,outputSchema});
  }
  const active=new Set<string>();
- type Snapshot={summary:z.infer<typeof preview>,digest:string,createdAt:number,state:string,operationId?:string};
+ type Snapshot={summary:z.infer<typeof preview>,digest:string,createdAt:number,state:string,operationId?:string,generation?:string,phase?:string,error?:string};
+ type Start=z.infer<typeof remoteRpcShape.remoteStart.input>;
+ const generation=randomUUID(),pending=new Map<string,Start>();
+ let wake:(()=>void)|undefined,stopping=false;
+ function fence(signal:AbortSignal){if(signal.aborted)throw Error('Plugin stopped; transfer will not be retried');}
  const key=(snapshotId:string)=>`remote-handoff:${snapshotId}`;
  async function load(snapshotId:string){const row=await bb.storage.kv.get<Snapshot>(key(snapshotId));if(!row)throw Error('Unknown snapshot');return row;}
- return {
-  remoteTargets:()=>call('handoffTargets',null,servers),
-  remoteOptions:(input:z.infer<typeof target>&{providerId?:string})=>call('handoffOptions',input,options),
-  async remotePrepare(input:z.infer<typeof scope>){
-   const captured=await captureRemoteSnapshot(bb,input),{archive,digest,...summary}=captured;
-   const value={...summary,snapshotId:randomUUID()};
-   await bb.storage.kv.set(key(value.snapshotId),{summary:value,digest,createdAt:Date.now(),state:'prepared'} satisfies Snapshot);
-   return value;
-  },
-  async remoteStart(input:z.infer<typeof remoteRpcShape.remoteStart.input>){
+ async function execute(input:Start,signal:AbortSignal){
    if(active.has(input.snapshotId))throw Error('This handoff is already in progress');
    active.add(input.snapshotId);
    try{
     const row=await load(input.snapshotId);
-    if(row.state!=='prepared')throw Error('Handoff has already been attempted. Check its status; it will not be automatically retried.');
+    if(row.state!=='queued'||row.generation!==generation)throw Error('Handoff has already been attempted. Check its status; it will not be automatically retried.');
+    const phase=async(value:string)=>{fence(signal);row.phase=value;await bb.storage.kv.set(key(input.snapshotId),row);fence(signal);};
+    await phase('Checking saved history and selected files');
     if(Date.now()-row.createdAt>30*60*1000)throw Error('Snapshot expired; prepare again');
     const captured=await captureRemoteSnapshot(bb,{threadId:row.summary.sourceThreadId,upToSeq:row.summary.cutoff},false);
     if(captured.digest!==row.digest||captured.sourceProjectId!==row.summary.sourceProjectId)throw Error('Source changed; prepare again');
@@ -124,15 +122,57 @@ export function createRemoteHandlers(bb:BbPluginApi){
     const {snapshotId,attachments,instructions,...destination}=input;
     row.state='starting';await bb.storage.kv.set(key(snapshotId),row);
     try{
+     await phase('Checking the remote destination');
      let op=await call('handoffBegin',{...destination,title:`Handoff: ${captured.title}`.slice(0,200),prompt:'Read handoff.md and the attached saved conversation in bounded chunks, then continue according to its instructions. This is a copied snapshot from an independent server; do not contact the source server.',files:files.map(f=>({name:f.name,mimeType:f.mimeType,sizeBytes:f.bytes.byteLength,sha256:sha(f.bytes)}))},result);
      row.operationId=op.operationId;await bb.storage.kv.set(key(snapshotId),row);
-     for(let index=0;index<files.length;index++)op=await call('handoffUpload',{operationId:op.operationId,index,bytesBase64:Buffer.from(files[index]!.bytes).toString('base64')},result);
+     for(let index=0;index<files.length;index++){await phase(`Uploading file ${index+1} of ${files.length}`);op=await call('handoffUpload',{operationId:op.operationId,index,bytesBase64:Buffer.from(files[index]!.bytes).toString('base64')},result);}
+     await phase('Creating the remote session');
      op=await call('handoffCommit',{operationId:op.operationId},result);
      if(op.serverId!==destination.serverId||op.projectId!==destination.projectId||op.hostId!==destination.hostId||op.environmentId!==destination.environmentId||op.state!=='complete')throw Error('Unexpected remote handoff identity or result');
-     row.state='complete';await bb.storage.kv.set(key(snapshotId),row);return op;
-    }catch(e){row.state='uncertain';await bb.storage.kv.set(key(snapshotId),row);throw e;}
+     row.state='complete';row.phase='Remote session created';await bb.storage.kv.set(key(snapshotId),row);return op;
+    }catch(e){row.state='uncertain';row.error=String(e).slice(0,500);await bb.storage.kv.set(key(snapshotId),row);throw e;}
+   }finally{active.delete(input.snapshotId);}
+  }
+ bb.background.service('remote-handoff',{
+  async start(signal){
+   stopping=signal.aborted;
+   const abort=()=>{stopping=true;wake?.();};signal.addEventListener('abort',abort,{once:true});
+   try{while(!signal.aborted){
+    const job=pending.entries().next().value;
+    if(!job){await new Promise<void>(resolve=>{wake=resolve;if(signal.aborted||pending.size)resolve();});wake=undefined;continue;}
+    const [snapshotId,input]=job;pending.delete(snapshotId);
+    try{await execute(input,signal);}
+    catch(error){const row=await load(snapshotId);row.state='uncertain';row.error=String(error).slice(0,500);await bb.storage.kv.set(key(snapshotId),row);}
+   }}finally{signal.removeEventListener('abort',abort);wake=undefined;}
+  },
+ });
+ return {
+  remoteTargets:()=>call('handoffTargets',null,servers),
+  remoteOptions:(input:z.infer<typeof target>&{providerId?:string})=>call('handoffOptions',input,options),
+  async remotePrepare(input:z.infer<typeof scope>){
+   const captured=await captureRemoteSnapshot(bb,input),{archive,digest,...summary}=captured;
+   const value={...summary,snapshotId:randomUUID()};
+   await bb.storage.kv.set(key(value.snapshotId),{summary:value,digest,createdAt:Date.now(),state:'prepared'} satisfies Snapshot);
+   return value;
+  },
+  async remoteStart(input:Start){
+   if(stopping)throw Error('Plugin is stopping; no transfer was accepted');
+   if(active.has(input.snapshotId))throw Error('This handoff is already in progress');
+   if(pending.size+active.size>=16)throw Error('Transfer queue is full; no transfer was accepted');
+   active.add(input.snapshotId);
+   try{
+    const row=await load(input.snapshotId);
+    if(row.state!=='prepared')throw Error('Handoff has already been attempted. Check its status; it will not be automatically retried.');
+    if(Date.now()-row.createdAt>30*60*1000)throw Error('Snapshot expired; prepare again');
+    if(new Set(input.attachments).size!==input.attachments.length||input.attachments.some(i=>!row.summary.attachments[i]))throw Error('Invalid attachment selection');
+    if(stopping)throw Error('Plugin is stopping; no transfer was accepted');
+    row.state='queued';row.generation=generation;row.phase='Queued';delete row.error;
+    await bb.storage.kv.set(key(input.snapshotId),row);
+    if(stopping)throw Error('Plugin stopped; accepted transfer will not be retried');
+    pending.set(input.snapshotId,input);wake?.();
+    return {state:'queued',phase:'Queued',error:null,operation:null};
    }finally{active.delete(input.snapshotId);}
   },
-  async remoteStatus({snapshotId}:{snapshotId:string}){const row=await load(snapshotId);return {state:row.state,operation:row.operationId?await call('handoffStatus',{operationId:row.operationId},result):null};},
+  async remoteStatus({snapshotId}:{snapshotId:string}){const row=await load(snapshotId);const interrupted=['queued','starting'].includes(row.state)&&(row.generation!==generation||stopping||!pending.has(snapshotId)&&!active.has(snapshotId));return {state:interrupted?'uncertain':row.state,phase:row.phase??row.state,error:interrupted?'Plugin stopped or restarted; the transfer was not repeated':row.error??null,operation:row.operationId?await call('handoffStatus',{operationId:row.operationId},result):null};},
  };
 }

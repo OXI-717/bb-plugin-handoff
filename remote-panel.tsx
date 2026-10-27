@@ -16,12 +16,13 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
  const [models,setModels]=useState<Model[]>([]),[model,setModel]=useState(''),[effort,setEffort]=useState('');
  const [preview,setPreview]=useState<Preview|null>(null),[selected,setSelected]=useState<number[]>([]),[instructions,setInstructions]=useState('');
  const [error,setError]=useState(''),[stage,setStage]=useState('Loading remote servers…'),[pending,setPending]=useState(false),[attempted,setAttempted]=useState(false);
+ const [watch,setWatch]=useState(false);
  const [complete,setComplete]=useState<{projectId:string,threadId:string}|null>(null);
  const server=servers.find(s=>s.serverId===serverId),env=server?.targets.find(e=>e.environmentId===environmentId);
  const target=server&&env?{serverId:server.serverId,projectId:server.projectId,hostId:env.hostId,environmentId:env.environmentId}:null;
  useEffect(()=>{let live=true;rpc.call('remoteTargets',null).then(rows=>{if(live){setServers(rows);setStage(rows.length?'':'No writable federation connections are configured.');}}).catch(e=>{if(live){setError(String(e));setStage('Remote handoff requires the matching federation plugin version.');}});return()=>{live=false;};},[rpc]);
  useEffect(()=>{
-  let live=true;setPreview(null);setSelected([]);setAttempted(false);setComplete(null);
+  let live=true;setPreview(null);setSelected([]);setAttempted(false);setComplete(null);setWatch(false);lock.current=false;
   rpc.call('remotePrepare',{threadId,...(upToSeq?{upToSeq}:{})}).then(value=>{if(live)setPreview(value);}).catch(e=>{if(live)setError(String(e));});
   return()=>{live=false;};
  },[rpc,threadId,upToSeq]);
@@ -36,18 +37,38 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
   return()=>{live=false;};
  },[rpc,serverId,environmentId,providerId]);
  const activeModel=models.find(m=>m.model===model);
+ type Status={state:string,phase:string,error:string|null,operation:{state:string,uploaded:number,projectId:string,threadId:string|null}|null};
+ function showStatus(value:Status){
+  const op=value.operation;
+  setStage(`${value.phase}${op?` · ${op.uploaded} files uploaded`:''}`);
+  setError(value.error??(value.state==='uncertain'?'The outcome is uncertain. The transfer was not repeated. Check its status before creating another.':''));
+  if(op?.threadId){setComplete({projectId:op.projectId,threadId:op.threadId});setStage('Remote session created. Model completion has not been verified.');}
+  return ['queued','starting'].includes(value.state);
+ }
+ useEffect(()=>{
+  if(!watch||!preview)return;
+  let live=true;let timer:ReturnType<typeof setTimeout>|undefined;
+  async function poll(){
+   try{
+    const value=await rpc.call('remoteStatus',{snapshotId:preview!.snapshotId});
+    if(!live)return;
+    if(showStatus(value))timer=setTimeout(()=>void poll(),2000);
+    else{setWatch(false);setPending(false);}
+   }catch(e){if(live){setError(String(e));setStage('Status unavailable. Check transfer status; this does not resend.');setWatch(false);setPending(false);}}
+  }
+  void poll();return()=>{live=false;if(timer)clearTimeout(timer);};
+ },[rpc,watch,preview?.snapshotId]);
  async function start(){
   if(!preview||!target||!providerId||!model||lock.current||attempted)return;
-  lock.current=true;setPending(true);setAttempted(true);setError('');setStage('Copying the selected snapshot and files, then creating one remote session…');
+  lock.current=true;setPending(true);setAttempted(true);setError('');setStage('Accepting the selected transfer…');
   try{
    const value=await rpc.call('remoteStart',{...target,providerId,model,...(effort?{reasoningLevel:effort as 'medium'}:{}),snapshotId:preview.snapshotId,attachments:selected,instructions});
-   if(value.threadId){setComplete({projectId:value.projectId,threadId:value.threadId});setStage('Remote session created. Model completion has not been verified.');}
-  }catch(e){setError(String(e));setStage('The transfer was not retried. Check its status before creating another.');}
-  finally{setPending(false);}
+   setWatch(showStatus(value));
+  }catch(e){setError(String(e));setStage('The transfer was not retried. Checking its saved status…');setWatch(true);}
  }
  async function status(){
   if(!preview)return;setError('');
-  try{const value=await rpc.call('remoteStatus',{snapshotId:preview.snapshotId});setStage(`Transfer: ${value.operation?.state??value.state}`);if(value.operation?.threadId)setComplete({projectId:value.operation.projectId,threadId:value.operation.threadId});}
+  try{const value=await rpc.call('remoteStatus',{snapshotId:preview.snapshotId});const running=showStatus(value);setPending(running);setWatch(running);}
   catch(e){setError(String(e));}
  }
  return <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">

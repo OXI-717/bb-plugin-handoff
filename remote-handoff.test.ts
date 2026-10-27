@@ -1,10 +1,15 @@
-import {describe,it,expect} from 'vitest';
+import {describe,it,expect,afterEach} from 'vitest';
+const cleanups:Array<()=>Promise<void>>=[];
+afterEach(async()=>{for(const stop of cleanups.splice(0))await stop();});
+function deferred(){let resolve!:()=>void;const promise=new Promise<void>(r=>{resolve=r;});return {promise,resolve};}
+async function settled(h:any,id:string){await expect.poll(()=>h.store.get(`remote-handoff:${id}`)?.state).toMatch(/^(complete|uncertain)$/);return h.store.get(`remote-handoff:${id}`);}
 import {captureRemoteSnapshot,createRemoteHandlers} from './remote-handoff';
 
 const request=(seq:number,text:string)=>({threadId:'thr_local',seq,type:'client/turn/requested',data:{initiator:'user',input:[{type:'text',text}]}});
 function harness(rows:any[]=[request(1,'first'),request(2,'last')]){
  const calls:any[]=[],store=new Map<string,unknown>();let uploads=0,failCommit=false;
- const bb:any={storage:{kv:{get:async(k:string)=>structuredClone(store.get(k)),set:async(k:string,v:unknown)=>{store.set(k,structuredClone(v));}}},sdk:{
+ const services:Array<(signal:AbortSignal)=>Promise<void>>=[];
+ const bb:any={background:{service:(_name:string,service:any)=>{services.push(service.start);}},storage:{kv:{get:async(k:string)=>structuredClone(store.get(k)),set:async(k:string,v:unknown)=>{store.set(k,structuredClone(v));}}},sdk:{
   threads:{get:async()=>({id:'thr_local',projectId:'proj_local',title:'Synthetic source'}),events:{list:async(args:any)=>{calls.push({kind:'events',args});if(args.order==='desc')return rows.slice(-1);return rows.filter(r=>r.seq>Number(args.afterSeq??0)).slice(0,100);}}},
   projects:{attachments:{read:async(args:any)=>{calls.push({kind:'file',args});return {bytes:Buffer.from('data'),sizeBytes:4,mimeType:'text/plain'};}}},
   plugins:{callRpc:async(args:any)=>{
@@ -15,7 +20,7 @@ function harness(rows:any[]=[request(1,'first'),request(2,'last')]){
    return args.outputSchema.parse(result);
   }},
  }};
- return {bb,calls,rows,store,fail:()=>{failCommit=true;}};
+ return {bb,calls,rows,store,fail:()=>{failCommit=true;},run:()=>{const controller=new AbortController();const done=services.at(-1)!(controller.signal);const stop=async()=>{controller.abort();await done;};cleanups.push(stop);return {abort:()=>controller.abort(),done};}};
 }
 const target={serverId:'alpha',projectId:'proj_alpha',hostId:'host_alpha',environmentId:'env_alpha',providerId:'codex',model:'model-example',attachments:[],instructions:''};
 describe('independent-server handoff',()=>{
@@ -32,7 +37,8 @@ describe('independent-server handoff',()=>{
   h.bb.sdk.projects.attachments.read=async()=>({bytes,sizeBytes:bytes.length,mimeType:'application/octet-stream'});
   const handlers=createRemoteHandlers(h.bb),value=await handlers.remotePrepare({threadId:'thr_local'});
   expect(value.attachments[0].mimeType).toBe('application/x-ndjson');bytes=Buffer.from('[]\n');
-  await expect(handlers.remoteStart({...target,snapshotId:value.snapshotId,attachments:[0]})).rejects.toThrow('Attachment changed');
+  h.run();await handlers.remoteStart({...target,snapshotId:value.snapshotId,attachments:[0]});
+  expect((await settled(h,value.snapshotId)).error).toContain('Attachment changed');
   expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
  });
  it('bounds local metadata reads and does not scan arbitrary numbers of attachments',async()=>{
@@ -60,7 +66,7 @@ describe('independent-server handoff',()=>{
   const h=harness([row]),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
   expect(h.calls.filter(c=>c.kind==='file')).toHaveLength(1);
   h.calls.length=0;
-  await handlers.remoteStart({...target,snapshotId:preview.snapshotId,attachments:[0]});
+  h.run();await handlers.remoteStart({...target,snapshotId:preview.snapshotId,attachments:[0]});await settled(h,preview.snapshotId);
   expect(h.calls.filter(c=>c.kind==='file').map(c=>c.args)).toEqual([{projectId:'proj_local',path:'stored.txt'}]);
   const start=h.calls.find(c=>c.method==='handoffBegin');expect(start.input.files.map((f:any)=>f.name)).toEqual(['handoff.md','conversation.jsonl','attachment-1.txt']);
   expect(start.input.serverId).toBe('alpha');expect(start.input.projectId).toBe('proj_alpha');
@@ -68,12 +74,69 @@ describe('independent-server handoff',()=>{
  });
  it('changed snapshot fails before copying any bytes',async()=>{
   const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});h.rows[0].data.input[0].text='changed';
-  await expect(handlers.remoteStart({...target,snapshotId:preview.snapshotId})).rejects.toThrow('Source changed');expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+  h.run();await handlers.remoteStart({...target,snapshotId:preview.snapshotId});expect((await settled(h,preview.snapshotId)).error).toContain('Source changed');expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
  });
  it('lost response cannot repeat creation, even after handoff plugin reload',async()=>{
   const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});h.fail();
-  await expect(handlers.remoteStart({...target,snapshotId:preview.snapshotId})).rejects.toThrow('Connection lost');
+  h.run();await handlers.remoteStart({...target,snapshotId:preview.snapshotId});expect((await settled(h,preview.snapshotId)).error).toContain('Connection lost');
   await expect(createRemoteHandlers(h.bb).remoteStart({...target,snapshotId:preview.snapshotId})).rejects.toThrow('already been attempted');
   expect(h.calls.filter(c=>c.method==='handoffCommit')).toHaveLength(1);
  });
+ it('acknowledges before slow capture finishes, then reports completion without a second start',async()=>{
+  const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
+  const gate=deferred(),entered=deferred(),original=h.bb.sdk.threads.events.list;
+  h.bb.sdk.threads.events.list=async(args:any)=>{entered.resolve();await gate.promise;return original(args);};
+  h.run();
+  try{
+   expect(await handlers.remoteStart({...target,snapshotId:preview.snapshotId})).toMatchObject({state:'queued',operation:null});
+   await entered.promise;
+   expect(await handlers.remoteStatus({snapshotId:preview.snapshotId})).toMatchObject({phase:'Checking saved history and selected files',error:null});
+   expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+   await expect(handlers.remoteStart({...target,snapshotId:preview.snapshotId})).rejects.toThrow(/progress|attempted/);
+  }finally{gate.resolve();}
+  expect((await settled(h,preview.snapshotId)).state).toBe('complete');
+  expect(h.calls.filter(c=>c.method==='handoffCommit')).toHaveLength(1);
+ });
+ it('preserves the failed upload phase and operation identity; status never resends',async()=>{
+  const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
+  const original=h.bb.sdk.plugins.callRpc;
+  h.bb.sdk.plugins.callRpc=async(args:any)=>{if(args.method==='handoffUpload'&&args.input.index===1)throw Error('Synthetic upload timeout');return original(args);};
+  h.run();await handlers.remoteStart({...target,snapshotId:preview.snapshotId});await settled(h,preview.snapshotId);
+  expect(await handlers.remoteStatus({snapshotId:preview.snapshotId})).toMatchObject({state:'uncertain',phase:'Uploading file 2 of 2',error:expect.stringContaining('Synthetic upload timeout'),operation:{operationId:'22222222-2222-4222-8222-222222222222'}});
+  await handlers.remoteStatus({snapshotId:preview.snapshotId});
+  expect(h.calls.filter(c=>c.method==='handoffUpload')).toHaveLength(1);expect(h.calls.some(c=>c.method==='handoffCommit')).toBe(false);
+ });
+ it('does not replay queued work after a plugin reload',async()=>{
+  const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
+  await handlers.remoteStart({...target,snapshotId:preview.snapshotId});
+  const reloaded=createRemoteHandlers(h.bb);h.run();
+  expect(await reloaded.remoteStatus({snapshotId:preview.snapshotId})).toMatchObject({state:'uncertain',error:expect.stringContaining('restarted')});
+  await expect(reloaded.remoteStart({...target,snapshotId:preview.snapshotId})).rejects.toThrow('attempted');
+  expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+ });
+ it('stops before the next mutation when disabled during an upload',async()=>{
+  const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
+  const gate=deferred(),entered=deferred(),original=h.bb.sdk.plugins.callRpc;
+  h.bb.sdk.plugins.callRpc=async(args:any)=>{const value=await original(args);if(args.method==='handoffUpload'){entered.resolve();await gate.promise;}return value;};
+  const worker=h.run();await handlers.remoteStart({...target,snapshotId:preview.snapshotId});await entered.promise;
+  worker.abort();gate.resolve();await worker.done;
+  expect((await settled(h,preview.snapshotId)).state).toBe('uncertain');
+  expect(h.calls.filter(c=>c.method==='handoffUpload')).toHaveLength(1);expect(h.calls.some(c=>c.method==='handoffCommit')).toBe(false);
+ });
+
+ it('fences abort during a saved phase before issuing the remote call',async()=>{
+  const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
+  const worker=h.run(),original=h.bb.storage.kv.set;
+  h.bb.storage.kv.set=async(k:string,v:any)=>{await original(k,v);if(v.phase==='Checking the remote destination')worker.abort();};
+  await handlers.remoteStart({...target,snapshotId:preview.snapshotId});await worker.done;
+  expect((await settled(h,preview.snapshotId)).state).toBe('uncertain');
+  expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+ });
+ it('reads old uncertain snapshots without replay or invented failure detail',async()=>{
+  const h=harness(),handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local'});
+  const row=h.store.get(`remote-handoff:${preview.snapshotId}`) as any;row.state='uncertain';
+  expect(await handlers.remoteStatus({snapshotId:preview.snapshotId})).toEqual({state:'uncertain',phase:'uncertain',error:null,operation:null});
+  expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+ });
+
 });
