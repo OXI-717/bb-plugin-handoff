@@ -682,10 +682,6 @@ async function runHandoff(
   const thread = await bb.sdk.threads.spawn({
     projectId: captured.projectId,
     providerId: request.providerId,
-    // Lifecycle ownership archives the successor with its source without the
-    // worker-parent notifications that would wake the outgoing, rate-limited agent.
-    // Current BB field; the legacy vendored SDK predates this ownership option.
-    ...{ lifecycleOwnerThreadId: request.sourceThreadId },
     executionInputSources: {
       providerId: "explicit",
       ...(request.model ? { model: "explicit" as const } : {}),

@@ -244,7 +244,9 @@ Partial captures do not request a later briefing or link an unscoped native log.
 A successful first reply confirms delivery, not understanding. Original attachment
 bytes and provider-hidden state are not copied into the event archive.
 
-This change requires BB 0.43.4 or newer for successor lifecycle ownership.
+The successor remains independent: archiving or deleting the source does not
+archive or delete the continuation. The source agent is not woken automatically.
+This change is checked against BB 0.46.1; older API compatibility is not claimed.
 
 ```sh
 npm install

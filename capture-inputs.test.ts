@@ -12,6 +12,19 @@ const echo = (seq: number, id: string, text: string): EventRowLike => ({
 });
 
 describe("BB accepted inputs", () => {
+  it("groups accepted retry chains without duplicating user requirements", () => {
+    const retry = request(4, "r2", "continue"); retry.data.retryOfRequestId = "r1";
+    const retryAgain = request(7, "r3", "continue"); retryAgain.data.retryOfRequestId = "r2";
+    const entries = projectEvents([request(1, "r1", "continue"), accepted(2, "r1"), echo(3, "u1", "continue"),
+      retry, accepted(5, "r2"), echo(6, "u2", "continue"), retryAgain, accepted(8, "r3"), echo(9, "u3", "continue")]).entries;
+    expect(entries.filter(e => e.kind === "user").map(e => e.body)).toEqual(["continue"]);
+    expect(entries.filter(e => e.body.startsWith("[Retry"))).toHaveLength(2);
+  });
+  it("keeps the first accepted retry when the original request was unconfirmed", () => {
+    const retry = request(3, "r2", "continue"); retry.data.retryOfRequestId = "r1";
+    const entries = projectEvents([request(1, "r1", "continue"), retry, accepted(4, "r2"), echo(5, "u2", "continue")]).entries;
+    expect(entries.filter(e => e.kind === "user").map(e => e.body)).toEqual(["continue"]);
+  });
   it("restores Claude user requests and retains long requirements verbatim", () => {
     const text = "Русский текст🙂".repeat(2500);
     expect(projectEvents([request(1, "r1", text), accepted(2, "r1")]).entries)

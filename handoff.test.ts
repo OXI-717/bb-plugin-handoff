@@ -185,7 +185,8 @@ describe("startHandoff", () => {
     };
     expect(spawn.providerId).toBe("codex");
     expect(spawn.model).toBe("gpt-5.6-sol");
-    expect(spawn).toMatchObject({ lifecycleOwnerThreadId: "thr_src", executionInputSources: { providerId: "explicit", model: "explicit" } });
+    expect(spawn).toMatchObject({ executionInputSources: { providerId: "explicit", model: "explicit" } });
+    expect(spawn).not.toHaveProperty("lifecycleOwnerThreadId");
     expect(spawn).not.toHaveProperty("parentThreadId");
     const uploads = calls.filter(call => call.method === "attachments.upload");
     expect(uploads).toHaveLength(2);
