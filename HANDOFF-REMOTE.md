@@ -21,7 +21,12 @@ can still contain private data: only transfer a source you intend to share.
 - Primary BB → configured remote project only; no remote → primary import.
 - Existing ready remote environments only. No checkout creation, working-tree
   patches, whole directory sync or arbitrary local filesystem reads.
-- Saved events: at most 4 MiB and 10,000 events, fixed at preview time. A changed
+- Saved events: up to 128 MiB and 250,000 events, fixed at preview time. Histories
+  over 4 MiB are gzip-compressed losslessly and split into JSON text parts below
+  the existing 4 MiB per-file limit. The receiving agent gets reconstruction and
+  SHA-256 verification instructions. The existing 16 MiB/16-file transfer budget
+  still applies; incompressible histories may exceed it and are rejected explicitly
+  without dropping events. A changed
   snapshot is rejected. Provider-hidden state is not recoverable.
 - Up to 14 selected attachments, 4 MiB per file and 16 MiB total including the
   snapshot. Supported: text, Markdown, JSON/JSONL, PDF and raster images.

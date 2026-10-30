@@ -6,7 +6,7 @@ import {Label} from './components/ui/label';
 import {Textarea} from './components/ui/textarea';
 
 type Server={serverId:string,projectId:string,label:string,available:boolean,targets:Array<{hostId:string,hostName:string,environmentId:string,path:string|null}>};
-type Preview={snapshotId:string,sourceThreadId:string,sourceProjectId:string,title:string,eventCount:number,cutoff:number,bytes:number,attachments:Array<{name:string,path:string,mimeType:string,sizeBytes:number}>,unavailable:number};
+type Preview={snapshotId:string,sourceThreadId:string,sourceProjectId:string,title:string,eventCount:number,cutoff:number,bytes:number,attachments:Array<{name:string,path:string,mimeType:string,sizeBytes:number}>,unavailable:number,archiveFileCount?:number,packedBytes?:number};
 type Model={model:string,displayName:string,isDefault:boolean,defaultReasoningEffort:string|null,supportedReasoningEfforts:Array<{reasoningEffort:string,description:string}>};
 const selectClass='w-full rounded border bg-background p-2 text-sm';
 export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,upToSeq?:number,onBack:()=>void}){
@@ -17,15 +17,16 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
  const [preview,setPreview]=useState<Preview|null>(null),[selected,setSelected]=useState<number[]>([]),[instructions,setInstructions]=useState('');
  const [error,setError]=useState(''),[stage,setStage]=useState('Loading remote servers…'),[pending,setPending]=useState(false),[attempted,setAttempted]=useState(false);
  const [watch,setWatch]=useState(false);
+ const [previewError,setPreviewError]=useState(''),[preparing,setPreparing]=useState(true),[prepareAttempt,setPrepareAttempt]=useState(0);
  const [complete,setComplete]=useState<{projectId:string,threadId:string}|null>(null);
  const server=servers.find(s=>s.serverId===serverId),env=server?.targets.find(e=>e.environmentId===environmentId);
  const target=server&&env?{serverId:server.serverId,projectId:server.projectId,hostId:env.hostId,environmentId:env.environmentId}:null;
  useEffect(()=>{let live=true;rpc.call('remoteTargets',null).then(rows=>{if(live){setServers(rows);setStage(rows.length?'':'No writable federation connections are configured.');}}).catch(e=>{if(live){setError(String(e));setStage('Remote handoff requires the matching federation plugin version.');}});return()=>{live=false;};},[rpc]);
  useEffect(()=>{
-  let live=true;setPreview(null);setSelected([]);setAttempted(false);setComplete(null);setWatch(false);lock.current=false;
-  rpc.call('remotePrepare',{threadId,...(upToSeq?{upToSeq}:{})}).then(value=>{if(live)setPreview(value);}).catch(e=>{if(live)setError(String(e));});
+  let live=true;setPreparing(true);setPreviewError('');setPreview(null);setSelected([]);setAttempted(false);setComplete(null);setWatch(false);lock.current=false;
+  rpc.call('remotePrepare',{threadId,...(upToSeq?{upToSeq}:{})}).then(value=>{if(live)setPreview(value);}).catch(e=>{if(live)setPreviewError(String(e));}).finally(()=>{if(live)setPreparing(false);});
   return()=>{live=false;};
- },[rpc,threadId,upToSeq]);
+ },[rpc,threadId,upToSeq,prepareAttempt]);
  useEffect(()=>{
   let live=true;setProviders([]);setModels([]);setProviderId('');setModel('');setEffort('');
   if(target)rpc.call('remoteOptions',target).then(value=>{if(live)setProviders(value.providers);}).catch(e=>{if(live)setError(String(e));});
@@ -37,6 +38,7 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
   return()=>{live=false;};
  },[rpc,serverId,environmentId,providerId]);
  const activeModel=models.find(m=>m.model===model);
+ const selectionProblem=preview?(selected.length>Math.min(14,15-(preview.archiveFileCount??1))?'The saved history leaves fewer attachment slots. Deselect some attachments.':selected.reduce((n,i)=>n+(preview.attachments[i]?.sizeBytes??0),0)+(preview.packedBytes??preview.bytes)+16384>16*1024*1024?'The saved history and selected attachments exceed the transfer size. Deselect some attachments.':''):'';
  type Status={state:string,phase:string,error:string|null,operation:{state:string,uploaded:number,projectId:string,threadId:string|null}|null};
  function showStatus(value:Status){
   const op=value.operation;
@@ -100,7 +102,11 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
    <Label htmlFor="remote-instructions">Instructions for continuation</Label><Textarea id="remote-instructions" value={instructions} maxLength={8000} onChange={e=>setInstructions(e.target.value)}/>
   </fieldset>
   {target&&<p className="text-sm">Destination: {server!.label} → {target.projectId} → {env!.hostName}. Permissions and execution belong to that remote server.</p>}
-  <Button onClick={()=>void start()} disabled={pending||attempted||!preview||!target||!providerId||!model||selected.length>14}>Copy selected context and start remote session</Button>
+  {preparing&&<p role="status">Preparing saved conversation history…</p>}
+  {previewError&&<div role="alert" className="text-sm text-destructive"><p>Conversation history could not be prepared: {previewError}</p><Button variant="outline" onClick={()=>setPrepareAttempt(n=>n+1)}>Retry preparing history</Button></div>}
+  {!preparing&&!preview&&!previewError&&<p role="status">Prepare the conversation history before starting a transfer.</p>}
+  {selectionProblem&&<p role="alert" className="text-sm text-destructive">{selectionProblem}</p>}
+  <Button onClick={()=>void start()} disabled={pending||attempted||!preview||!target||!providerId||!model||!!selectionProblem}>Copy selected context and start remote session</Button>
   {stage&&<p className="text-sm" role="status">{stage}</p>}{error&&<p className="text-sm text-destructive" role="alert">{error}</p>}
   {attempted&&<Button variant="outline" onClick={()=>void status()} disabled={pending}>Check transfer status (does not resend)</Button>}
   {complete&&<a className="underline" href={`/projects/${encodeURIComponent(complete.projectId)}/threads/${encodeURIComponent(complete.threadId)}`}>Open the remote session</a>}

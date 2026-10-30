@@ -140,3 +140,33 @@ describe('independent-server handoff',()=>{
  });
 
 });
+
+
+describe('large remote history',()=>{
+ it('captures over ten thousand events and four MiB, then uploads a lossless packed archive',async()=>{
+  const rows=Array.from({length:12001},(_,i)=>request(i+1,'synthetic text '.repeat(40)));
+  const h=harness(rows),handlers=createRemoteHandlers(h.bb);
+  const value=await handlers.remotePrepare({threadId:'thr_local'});
+  expect(value.eventCount).toBe(12001);expect(value.bytes).toBeGreaterThan(4*1024*1024);
+  h.run();await handlers.remoteStart({...target,snapshotId:value.snapshotId,attachments:[]});
+  expect((await settled(h,value.snapshotId)).state).toBe('complete');
+  const begin=h.calls.find(c=>c.method==='handoffBegin');
+  expect(begin.input.files[1].name).toBe('conversation-001.json');
+  const uploaded=h.calls.find(c=>c.method==='handoffUpload'&&c.input.index===1);
+  const part=JSON.parse(Buffer.from(uploaded.input.bytesBase64,'base64').toString());
+  const {gunzipSync}=await import('node:zlib');
+  const decoded=gunzipSync(Buffer.from(part.data,'base64')).toString();
+  expect(decoded).toBe(rows.map(r=>JSON.stringify(r)+'\n').join(''));
+ });
+});
+
+
+describe('packed transfer capacity',()=>{
+ it('rejects incompressible history before preparing a transfer or making remote calls',async()=>{
+  const {randomBytes}=await import('node:crypto');
+  const h=harness([request(1,randomBytes(17*1024*1024).toString('base64'))]);
+  await expect(createRemoteHandlers(h.bb).remotePrepare({threadId:'thr_local'})).rejects.toThrow('16 MiB');
+  expect(h.store.size).toBe(0);
+  expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
+ });
+});
