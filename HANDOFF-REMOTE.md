@@ -53,7 +53,8 @@ No additional agent tools or consumer permissions are enabled by this feature.
 ## Continue a remote source on the same server
 
 Requires the matching Federation source RPC. In the remote panel, select the
-source server and enter the exact source thread ID. The configured project and
+source server and enter the exact source thread ID, then click **Prepare remote history**.
+Editing the source clears the prepared snapshot and never reads history automatically. The configured project and
 verified server/project/thread tuple are shown before transfer. Select an existing
 workspace on that same server/project, then explicitly select the provider (for
 example Codex), model and reasoning effort. Preparation reads saved events only;
