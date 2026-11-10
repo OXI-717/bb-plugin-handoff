@@ -152,7 +152,7 @@ codex resume 019fd95c-907f-7eb1-8dfc-2aad427ffc09
 ## Install
 
 ```sh
-bb plugin install 'git:https://github.com/OXI-717/bb-plugin-handoff.git@^0.8.3'
+bb plugin install 'git:https://github.com/OXI-717/bb-plugin-handoff.git@^0.8.4'
 ```
 
 Requires bb ≥ 0.46.1. No keys, no configuration, no external services — it only
@@ -281,7 +281,7 @@ See every bb plugin I publish at
 
 This OXI-maintained fork preserves the upstream MIT license and attribution.
 The plugin ID remains `handoff` and the package name remains `bb-plugin-handoff`.
-Version 0.8.3 prepares naming and release checks on top of 0.8.2; it is available
+Version 0.8.4 prepares same-server remote continuations on top of 0.8.3; it is available
 only after its release tag is published.
 
 Publish immutable `vX.Y.Z` tags from reviewed commits after CI succeeds. The tag

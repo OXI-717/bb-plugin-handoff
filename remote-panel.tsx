@@ -11,6 +11,9 @@ type Model={model:string,displayName:string,isDefault:boolean,defaultReasoningEf
 const selectClass='w-full rounded border bg-background p-2 text-sm';
 export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,upToSeq?:number,onBack:()=>void}){
  const rpc=useRpc<typeof rpcContract>(),lock=useRef(false);
+ const [sourceServerId,setSourceServerId]=useState('');
+ const [sourceThreadId,setSourceThreadId]=useState('');
+ const [preparedSource,setPreparedSource]=useState<{threadId:string,source:{serverId:string,projectId:string}}|null>(null);
  const [servers,setServers]=useState<Server[]>([]),[serverId,setServerId]=useState(''),[environmentId,setEnvironmentId]=useState('');
  const [providers,setProviders]=useState<Array<{id:string,displayName:string,available:boolean}>>([]),[providerId,setProviderId]=useState('');
  const [models,setModels]=useState<Model[]>([]),[model,setModel]=useState(''),[effort,setEffort]=useState('');
@@ -24,9 +27,10 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
  useEffect(()=>{let live=true;rpc.call('remoteTargets',null).then(rows=>{if(live){setServers(rows);setStage(rows.length?'':'No writable federation connections are configured.');}}).catch(e=>{if(live){setError(String(e));setStage('Remote handoff requires the matching federation plugin version.');}});return()=>{live=false;};},[rpc]);
  useEffect(()=>{
   let live=true;setPreparing(true);setPreviewError('');setPreview(null);setSelected([]);setAttempted(false);setComplete(null);setWatch(false);lock.current=false;
-  rpc.call('remotePrepare',{threadId,...(upToSeq?{upToSeq}:{})}).then(value=>{if(live)setPreview(value);}).catch(e=>{if(live)setPreviewError(String(e));}).finally(()=>{if(live)setPreparing(false);});
+  if(sourceServerId&&!preparedSource){setPreparing(false);return;}
+  rpc.call('remotePrepare',preparedSource??{threadId,...(upToSeq?{upToSeq}:{})}).then(value=>{if(live)setPreview(value);}).catch(e=>{if(live)setPreviewError(String(e));}).finally(()=>{if(live)setPreparing(false);});
   return()=>{live=false;};
- },[rpc,threadId,upToSeq,prepareAttempt]);
+ },[rpc,threadId,upToSeq,prepareAttempt,sourceServerId,preparedSource]);
  useEffect(()=>{
   let live=true;setProviders([]);setModels([]);setProviderId('');setModel('');setEffort('');
   if(target)rpc.call('remoteOptions',target).then(value=>{if(live)setProviders(value.providers);}).catch(e=>{if(live)setError(String(e));});
@@ -77,10 +81,24 @@ export function RemoteHandoffPanel({threadId,upToSeq,onBack}:{threadId:string,up
   <Button variant="outline" onClick={onBack} disabled={pending}>Back to machines on this BB</Button>
   <h2 className="font-semibold">🌐 Hand off to a remote BB</h2>
   <p className="text-sm text-muted-foreground">Copies saved conversation events and the attachments you select. The working directory, credentials and native provider session stay on the source server. Remote machines are not enrolled here.</p>
+  <label className="text-sm">Source server
+   <select className={selectClass} value={sourceServerId} disabled={pending||attempted} onChange={e=>{setPreparedSource(null);setPreview(null);setSourceServerId(e.target.value);setServerId(e.target.value);setEnvironmentId('');}}>
+    <option value="">This BB</option>{servers.map(s=><option key={s.serverId} value={s.serverId} disabled={!s.available}>{s.label}</option>)}
+   </select>
+  </label>
+  {sourceServerId?<label className="text-sm">Source thread ID
+   <input className={selectClass} value={sourceThreadId} disabled={pending||attempted} placeholder="thr_example" onChange={e=>{setPreparedSource(null);setPreview(null);setSourceThreadId(e.target.value);}}/>
+   <span>Project: {servers.find(s=>s.serverId===sourceServerId)?.projectId}. The continuation stays on this server and project. Remote attachment bytes are not copied.</span>
+  </label>:null}
+  {sourceServerId?<Button disabled={pending||attempted||preparing||!!preparedSource||!/^thr_[a-z0-9]+$/.test(sourceThreadId)} onClick={()=>{
+   const source=servers.find(s=>s.serverId===sourceServerId);
+   if(source)setPreparedSource(current=>current??{threadId:sourceThreadId,source:{serverId:source.serverId,projectId:source.projectId}});
+  }}>Prepare remote history</Button>:null}
+  {preview?<p>Verified source: {sourceServerId||'This BB'} / {preview.sourceProjectId} / {preview.sourceThreadId}</p>:null}
   <fieldset disabled={pending||attempted} className="flex min-w-0 flex-col gap-3">
    <Label htmlFor="remote-server">Remote server / project</Label>
    <select id="remote-server" className={selectClass} value={serverId} onChange={e=>{setServerId(e.target.value);setEnvironmentId('');setError('');}}>
-    <option value="">Choose a remote server</option>{servers.map(s=><option key={s.serverId} value={s.serverId} disabled={!s.available}>{s.label} — {s.projectId}{s.available?'':' (unavailable or read-only)'}</option>)}
+    <option value="">Choose a remote server</option>{servers.map(s=><option key={s.serverId} value={s.serverId} disabled={!s.available||!!sourceServerId&&s.serverId!==sourceServerId}>{s.label} — {s.projectId}{s.available?'':' (unavailable or read-only)'}</option>)}
    </select>
    <Label htmlFor="remote-environment">Remote machine / existing workspace</Label>
    <select id="remote-environment" className={selectClass} value={environmentId} onChange={e=>setEnvironmentId(e.target.value)}>

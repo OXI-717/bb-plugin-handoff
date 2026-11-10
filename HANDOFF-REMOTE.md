@@ -49,3 +49,25 @@ can still contain private data: only transfer a source you intend to share.
 
 No additional agent tools or consumer permissions are enabled by this feature.
 `allowWrites` on the selected connection is required; `allowAgentReads` is unchanged.
+
+## Continue a remote source on the same server
+
+Requires the matching Federation source RPC. In the remote panel, select the
+source server and enter the exact source thread ID, then click **Prepare remote history**.
+Editing the source clears the prepared snapshot and never reads history automatically. The configured project and
+verified server/project/thread tuple are shown before transfer. Select an existing
+workspace on that same server/project, then explicitly select the provider (for
+example Codex), model and reasoning effort. Preparation reads saved events only;
+it does not start a model. The remote sequence boundary is independent of any
+selected message on the primary BB.
+
+Starting creates an independent continuation using the existing transfer queue.
+The source is never deleted, archived or woken. Raw history is reference data;
+credentials and native provider sessions are not copied. Remote attachment bytes
+are currently unavailable and are reported as missing. A changed source or
+connection aborts before commit. After an ambiguous create result, inspect the
+saved operation status; do not repeat creation or prepare a replacement blindly.
+
+Acceptance must separately verify the exact tuple, selected provider and new
+remote thread, plus unchanged source status. Synthetic tests do not prove live
+remote delivery. Do not use real project identities in fixtures or public logs.
