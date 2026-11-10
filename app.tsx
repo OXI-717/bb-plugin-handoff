@@ -1169,7 +1169,7 @@ function HandoffPanel({ threadId, params }: { threadId: string; params?: unknown
 export default definePluginApp((app) => {
   app.slots.threadPanelAction({
     id: "handoff",
-    title: "Hand off",
+    title: "OXI Handoff",
     icon: "ArrowTurnForward",
     layout: "flush",
     component: HandoffPanel,
@@ -1181,7 +1181,7 @@ export default definePluginApp((app) => {
     run: ({ message, openPanel }) => {
       const opened = openPanel({
         actionId: "handoff",
-        title: "Hand off",
+        title: "OXI Handoff",
         params: {
           upToSeq: message.sourceSeqEnd,
           messagePreview: message.text.replace(/\s+/g, " ").trim().slice(0, 200),

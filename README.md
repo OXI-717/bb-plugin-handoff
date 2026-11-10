@@ -2,14 +2,14 @@
 
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# Handoff
+# OXI Handoff
 
 **Move a whole session between agents — and between machines — in both directions.**
 
 Hand a bb thread off to Codex, Claude Code, Kimi, opencode, Cursor…<br>
 or adopt a terminal session that never ran in bb at all.
 
-[![bb ≥ 0.36](https://img.shields.io/badge/bb-%E2%89%A5%200.36-1f2430?style=flat-square)](https://getbb.app)
+[![bb ≥ 0.46.1](https://img.shields.io/badge/bb-%E2%89%A5%200.46.1-1f2430?style=flat-square)](https://getbb.app)
 [![license MIT](https://img.shields.io/badge/license-MIT-1f2430?style=flat-square)](LICENSE)
 
 </div>
@@ -37,7 +37,7 @@ That's the whole idea, applied in both directions:
 
 ## Hand off — bb thread → any agent
 
-Open any thread's right panel (`⌘J`) and add the **Hand off** tab. Pick a
+Open any thread's right panel (`⌘J`) and add the **OXI Handoff** tab. Pick a
 target; everything else has a sane default.
 
 - **Any installed provider is a target.** The panel reads bb's live catalog, so
@@ -152,10 +152,10 @@ codex resume 019fd95c-907f-7eb1-8dfc-2aad427ffc09
 ## Install
 
 ```sh
-bb plugin install git:https://github.com/vburojevic/bb-plugin-handoff.git
+bb plugin install 'git:https://github.com/OXI-717/bb-plugin-handoff.git@^0.8.3'
 ```
 
-Requires bb ≥ 0.36. No keys, no configuration, no external services — it only
+Requires bb ≥ 0.46.1. No keys, no configuration, no external services — it only
 talks to your own bb and the session files already on your disks.
 
 ## CLI
@@ -276,3 +276,25 @@ bb plugin dev       # watch loop: rebuild + reload on save
 
 See every bb plugin I publish at
 [**vburojevic/bb-plugins**](https://github.com/vburojevic/bb-plugins).
+
+## Fork releases and updates
+
+This OXI-maintained fork preserves the upstream MIT license and attribution.
+The plugin ID remains `handoff` and the package name remains `bb-plugin-handoff`.
+Version 0.8.3 prepares naming and release checks on top of 0.8.2; it is available
+only after its release tag is published.
+
+Publish immutable `vX.Y.Z` tags from reviewed commits after CI succeeds. The tag
+must match the package and lockfile version. Never move an existing release tag.
+CI runs identity checks, typecheck, tests and a BB build on pull requests and tags.
+
+For an installation already tracking this fork with a compatible semver range:
+
+```sh
+bb plugin update handoff
+```
+
+Do not uninstall to change an existing source: preserve settings and state with
+a separately reviewed source migration and backup. Branch or commit pins need
+that migration before automatic release tracking works. Installing this fork
+does not require publishing private project data or changing repository visibility.
