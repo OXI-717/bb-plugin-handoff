@@ -51,3 +51,22 @@ it('enables a small prepared session after choosing a complete destination',asyn
   expect(rpc.call.mock.calls.some(([method])=>method==='remoteStart')).toBe(false);
  }finally{await act(async()=>root.unmount());container.remove();}
 });
+
+it('prepares an explicitly selected remote thread without starting it',async()=>{
+ Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});rpc.call.mockReset();
+ rpc.call.mockImplementation(async(method:string,input:any)=>{
+  if(method==='remoteTargets')return [{serverId:'synthetic',projectId:'proj_test',label:'Synthetic',available:true,targets:[]}];
+  if(method==='remotePrepare')return {snapshotId:'snapshot',sourceThreadId:input.threadId,sourceProjectId:'proj_test',title:'Synthetic',eventCount:1,bytes:100,cutoff:1,attachments:[],unavailable:0};
+  throw Error('Unexpected mutation');
+ });
+ const container=document.createElement('div'),root=createRoot(container);document.body.append(container);
+ try{
+  await act(async()=>root.render(<RemoteHandoffPanel threadId="thr_primary" upToSeq={4} onBack={()=>{}}/>));
+  await act(async()=>{const select=container.querySelector('select')!;select.value='synthetic';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  await act(async()=>{const input=container.querySelector('input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'thr_remote');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  const calls=rpc.call.mock.calls.filter(([method])=>method==='remotePrepare');
+  expect(calls.at(-1)?.[1]).toEqual({threadId:'thr_remote',source:{serverId:'synthetic',projectId:'proj_test'}});
+  expect(container.textContent).toContain('synthetic / proj_test / thr_remote');
+  expect(rpc.call.mock.calls.some(([method])=>method==='remoteStart')).toBe(false);
+ }finally{await act(async()=>root.unmount());container.remove();}
+});

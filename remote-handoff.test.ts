@@ -170,3 +170,19 @@ describe('packed transfer capacity',()=>{
   expect(h.calls.some(c=>c.kind==='rpc')).toBe(false);
  });
 });
+
+it('continues a remote source without consulting primary history and rejects a different destination',async()=>{
+ const h=harness();const original=h.bb.sdk.plugins.callRpc;
+ h.bb.sdk.threads.get=async()=>{throw Error('Primary must not be read');};
+ h.bb.sdk.plugins.callRpc=async(args:any)=>{
+  if(args.method!=='handoffSource')return original(args);
+  expect(args.input.serverId).toBe('alpha');
+  expect(args.input.projectId).toBe('proj_alpha');
+  return {thread:{id:'thr_local',projectId:'proj_alpha',title:'Remote'},events:args.input.order==='desc'?h.rows.slice(-1):h.rows.filter(r=>r.seq>(args.input.afterSeq??0))};
+ };
+ const handlers=createRemoteHandlers(h.bb),preview=await handlers.remotePrepare({threadId:'thr_local',source:{serverId:'alpha',projectId:'proj_alpha'}});
+ await expect(handlers.remoteStart({...target,serverId:'beta',snapshotId:preview.snapshotId})).rejects.toThrow('must remain');
+ h.run();await handlers.remoteStart({...target,snapshotId:preview.snapshotId});
+ expect((await settled(h,preview.snapshotId)).state).toBe('complete');
+ expect(h.calls.filter(c=>c.method==='handoffCommit')).toHaveLength(1);
+});
